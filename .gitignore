@@ -144,8 +144,8 @@ data
 # experiment files
 *.png
 *.pkl
-*.yaml
-*.sh
+# *.yaml
+# *.sh
 *.pt
 *.tar
 *.h5
@@ -157,6 +157,7 @@ experiment
 *.tar.gz
 *.tsv
 *.txt
+*.out
 
 # doc
 docs/build
