@@ -3,13 +3,14 @@ import glob
 import json
 
 DATASET_ROOT = '/abelab/DB4'
-FILELISTS_ROOT = '/work/abelab4/s_koha/vits/filelists/studies'
-METADATA_PTAH = 'downstream/emotion_studies'
+STUDIES_FILELISTS_ROOT = '/work/abelab4/s_koha/vits/filelists/studies'
+CALLS_FILELISTS_ROOT = '/work/abelab4/s_koha/vits/filelists/calls'
+METADATA_PTAH = 'downstream/emotion_studiesplus'
 
 enSpk2jpSpk = {'Teacher':'講師', 'FStudent':'女子生徒', 'MStudent':'男子生徒'}
 enEmo2jpEmo = {'平静': 'Neutral', '喜び': 'Happy', '悲しみ': 'Sad', '怒り': 'Angry'}
 
-def _get_filename2emotion(studies_dir):
+def _get_filename2emotion_studies(studies_dir):
     filename2emotion = dict()
 
     for type_name in ['ITA', 'Long_dialogue', 'Short_dialogue']:
@@ -39,27 +40,75 @@ def _get_filename2emotion(studies_dir):
 
     return filename2emotion
 
+def _get_filename2emotion_calls(calls_dir):
+    filename2emotion = dict()
+
+    for type_name in ['P-dialogue', 'S-dialogue']:
+        type_dir = os.path.join(calls_dir, type_name)
+        
+        # P01, S01などのディレクトリ名を取得
+        dir_list = [f for f in os.listdir(type_dir) if os.path.isdir(os.path.join(type_dir, f))]
+        for dname in dir_list:
+            d = os.path.join(type_dir, dname)
+
+            txt_files = sorted(glob.glob(os.path.join(d, '**/txt/*.txt'), recursive=True))
+            wav_files = sorted(glob.glob(os.path.join(d, f'**/wav/*.wav'), recursive=True))
+            i = 0
+            for txt_file in txt_files:
+                with open(txt_file, mode='r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                lines = [s for s in lines if s.split('|')[0]=='オペレータ']
+                for line in lines:
+                    emotion = line.split('|')[1]  # 感情
+
+                    filepath = wav_files[i]
+
+                    filename2emotion[filepath] = enEmo2jpEmo[emotion]
+
+                    i+=1
+
+    return filename2emotion
+
 def main():
     studies_dir = os.path.join(DATASET_ROOT, 'STUDIES')
     assert os.path.isdir(studies_dir)
+    calls_dir = os.path.join(DATASET_ROOT, 'STUDIES-2')
+    assert os.path.isdir(calls_dir)
 
     # ファイルパスをkeyに感情を記録
-    filename2emotion = _get_filename2emotion(studies_dir)
+    filename2emotion = _get_filename2emotion_studies(studies_dir)
+    # calls分をstudiesのdictにくっつける
+    filename2emotion.update(_get_filename2emotion_calls(calls_dir))
 
     out_dir = os.path.join(METADATA_PTAH, 'meta_data')
     os.makedirs(os.path.join(out_dir), exist_ok=True)
 
     # 学習データの分割ごとにファイル作成
-    filelists = glob.glob(os.path.join(FILELISTS_ROOT, '*.txt'))
-    for filelist in filelists:
-        tr_type = os.path.splitext(os.path.basename(filelist))[0].split('_')[4]
+    studies_filelists = sorted(glob.glob(os.path.join(STUDIES_FILELISTS_ROOT, '*.txt')))
+    calls_filelists = sorted(glob.glob(os.path.join(CALLS_FILELISTS_ROOT, '*.txt')))
+
+    for studies_filelist, calls_filelist in zip(studies_filelists, calls_filelists):
+        tr_type = os.path.splitext(os.path.basename(studies_filelist))[0].split('_')[4]
+        # studiesとcallsで同じ学習タイプを見れているか
+        assert tr_type == os.path.splitext(os.path.basename(calls_filelist))[0].split('_')[4]
         
         meta_data = list()
         train_out_path = os.path.join(out_dir, f'{tr_type}_meta_data.json')
 
-        with open(filelist, mode='r', encoding='utf-8') as f:
+        with open(studies_filelist, mode='r', encoding='utf-8') as f:
             lines = f.readlines()
             filepath_list = [s.rstrip().split('|')[0].replace('dataset/', DATASET_ROOT+'/') for s in lines]
+            for filepath in filepath_list:
+                assert os.path.exists(filepath)
+
+                meta_data.append({
+                    'path': filepath,
+                    'label': filename2emotion[filepath]
+                })
+
+        with open(calls_filelist, mode='r', encoding='utf-8') as f:
+            lines = f.readlines()
+            filepath_list = [s.rstrip().split('|')[0].replace('dataset/', DATASET_ROOT+'/').replace('/CALLS/', '/STUDIES-2/') for s in lines]
             for filepath in filepath_list:
                 assert os.path.exists(filepath)
 
