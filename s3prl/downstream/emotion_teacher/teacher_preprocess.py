@@ -69,7 +69,7 @@ def main():
                 })
                 
         train_data = {
-            'labels': {'Neutral': 0, 'Happy': 1, 'Sad': 2, 'Angry': 3},
+            'labels': {'Neutral': 0, 'Happy': 1, 'Sad': 2},
             'meta_data': meta_data
         }
 
