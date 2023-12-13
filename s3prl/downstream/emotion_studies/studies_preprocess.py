@@ -76,23 +76,6 @@ def main():
         with open(train_out_path, 'w') as f:
             json.dump(train_data, f)
             print(f'{tr_type} data: {len(meta_data)}')
-    
-    # 全データ（Angryが入ってくる点に注意）
-    all_meta_data = list()  
-    wavs = glob.glob(os.path.join(studies_dir, '**/*.wav'), recursive=True)
-    for wav_path in wavs:
-        all_meta_data.append({
-            'path': wav_path,
-            'label': filename2emotion[wav_path]
-        })
-    all_data = {
-            'labels': {'Neutral': 0, 'Happy': 1, 'Sad': 2, 'Angry': 3},
-            'meta_data': all_meta_data
-        }
-
-    with open(os.path.join(out_dir, 'all_meta_data.json'), 'w') as f:
-        json.dump(all_data, f)
-        print(f'all data: {len(all_meta_data)}')
 
 if __name__ == '__main__':
     main()

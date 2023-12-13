@@ -12,7 +12,7 @@ from torch.nn.utils.rnn import pad_sequence
 
 from ..model import *
 from .model import *
-from .dataset import JTESDataset, collate_fn
+from .dataset import STUDIESDataset, collate_fn
 
 
 class DownstreamExpert(nn.Module):
@@ -30,50 +30,38 @@ class DownstreamExpert(nn.Module):
         DATA_ROOT = self.datarc['root']
         meta_data = self.datarc["meta_data"]
 
-        print(f"[Expert] - Using ALL data for training. test data is NONE.")
+        print(f"[Expert] - Using predefined data: train, val, and test")
 
         train_path = os.path.join(meta_data, 'train_meta_data.json')
         assert os.path.exists(train_path)
         print(f'[Expert] - Training path: {train_path}')
-        print(f'[Expert] - Testing path: None')
-        
-        # dataset = JTESDataset(DATA_ROOT, train_path, self.datarc['pre_load'])
-        
-        import pickle
-        try:
-            with open('./downstream/emotion_jtes-all/jtes-all.pkl', 'rb') as f:
-                dataset = pickle.load(f)
-            print('[Expert] - Loaded ./downstream/emotion_jtes-all/jtes-all.pkl')
-            self.dataset = dataset
-        except:
-            dataset = JTESDataset(DATA_ROOT, train_path, self.datarc['pre_load'])
-            with open('./downstream/emotion_jtes-all/jtes-all.pkl', 'wb') as f:
-                pickle.dump(dataset, f)
-            print('[Expert] - Saved ./downstream/emotion_jtes-all/jtes-all.pkl')
-            self.dataset = dataset
 
-        trainlen = int((1 - self.datarc['valid_ratio']) * len(dataset))
-        lengths = [trainlen, len(dataset) - trainlen]  # [16000, 4000]
-        
-        torch.manual_seed(0)
-        self.train_dataset, self.dev_dataset = random_split(dataset, lengths)
+        val_path = os.path.join(meta_data, 'val_meta_data.json')
+        assert os.path.exists(val_path)
+        print(f'[Expert] - Validating path: {val_path}')
 
-        print(f'[Expert] - Train data lengths:      {len(self.train_dataset)}')
-        print(f'[Expert] - Validation data lengths: {len(self.dev_dataset)}')
+        test_path = os.path.join(meta_data, 'test_meta_data.json')
+        assert os.path.exists(test_path)
+        print(f'[Expert] - Testing path: {test_path}')
+        
+        train_dataset = STUDIESDataset(DATA_ROOT, train_path, self.datarc['pre_load'])
+        self.train_dataset = train_dataset
+        self.dev_dataset = STUDIESDataset(DATA_ROOT, val_path, self.datarc['pre_load'])  # 名前をval --> dev
+        self.test_dataset = STUDIESDataset(DATA_ROOT, test_path, self.datarc['pre_load'])
 
         model_cls = eval(self.modelrc['select'])  # <class 's3prl.downstream.model.UtteranceLevel'>
         model_conf = self.modelrc.get(self.modelrc['select'], {})  # {'pooling': 'MeanPooling'}
         self.projector = nn.Linear(upstream_dim, self.modelrc['projector_dim'])  # 768 --> 256
         self.model = model_cls(
             input_dim = self.modelrc['projector_dim'],
-            output_dim = dataset.class_num,
+            output_dim = train_dataset.class_num,
             **model_conf,
         )
         self.objective = nn.CrossEntropyLoss()
         self.expdir = expdir
         self.register_buffer('best_score', torch.zeros(1))
 
-        self.softmax = nn.Softmax(dim=1)  # 特徴量抽出用
+        self.softmax = nn.Softmax(dim=1)  # for feature extraction
 
 
     def get_downstream_name(self):
@@ -115,7 +103,7 @@ class DownstreamExpert(nn.Module):
         features_len = torch.IntTensor([len(feat) for feat in features]).to(device=device)
         features = pad_sequence(features, batch_first=True)  # バッチ（list）内の最大フレームにあわせてゼロ埋め
         features = self.projector(features)  # [B, Len, 256]
-        predicted, _, _ = self.model(features, features_len)  # add hidden_state
+        predicted, _, hidden_state = self.model(features, features_len)  # add hidden_state
 
         labels = torch.LongTensor(labels).to(features.device)
         loss = self.objective(predicted, labels)
@@ -125,8 +113,8 @@ class DownstreamExpert(nn.Module):
         records['loss'].append(loss.item())
 
         records["filename"] += filenames
-        records["predict"] += [self.dataset.idx2emotion[idx] for idx in predicted_classid.cpu().tolist()]  # modified
-        records["truth"] += [self.dataset.idx2emotion[idx] for idx in labels.cpu().tolist()]  # modified
+        records["predict"] += [self.test_dataset.idx2emotion[idx] for idx in predicted_classid.cpu().tolist()]
+        records["truth"] += [self.test_dataset.idx2emotion[idx] for idx in labels.cpu().tolist()]
 
         return loss
 
@@ -161,18 +149,18 @@ class DownstreamExpert(nn.Module):
 
         return save_names
 
-    def extract(self, feature, label, filename):
-        device = feature[0].device
-        feature_len = torch.IntTensor([len(feat) for feat in feature]).to(device=device)
-        feature = pad_sequence(feature, batch_first=True)  # リスト（バッチ）内の最大フレームにあわせてゼロ埋め
-        feature = self.projector(feature)  # [B, Len, 768] --> [B, Len, 256]
-        predicted, _, hidden_state = self.model(feature, feature_len)  # add hidden_state
+    # def extract(self, feature, label, filename):
+    #     device = feature[0].device
+    #     feature_len = torch.IntTensor([len(feat) for feat in feature]).to(device=device)
+    #     feature = pad_sequence(feature, batch_first=True)  # リスト（バッチ）内の最大フレームにあわせてゼロ埋め
+    #     feature = self.projector(feature)  # [B, Len, 768] --> [B, Len, 256]
+    #     predicted, _, hidden_state = self.model(feature, feature_len)  # add hidden_state
 
-        predicted_classid = predicted.max(dim=-1).indices
-        pp = self.softmax(predicted)
+    #     predicted_classid = predicted.max(dim=-1).indices
+    #     pp = self.softmax(predicted)
 
-        predicted_classid = predicted_classid.cpu()
-        pp = pp.cpu()
-        hidden_state = hidden_state.cpu()
+    #     predicted_classid = predicted_classid.cpu()
+    #     pp = pp.cpu()
+    #     hidden_state = hidden_state.cpu()
 
-        return predicted_classid, pp, hidden_state
+    #     return predicted_classid, pp, hidden_state
