@@ -1,5 +1,5 @@
 runner:
-  total_steps: 30000
+  total_steps: 60000
   gradient_clipping: 1
   gradient_accumulate_steps: 8
 
@@ -9,7 +9,7 @@ runner:
   max_keep: 1
   eval_dataloaders:
     - dev
-    - test
+    # - test
 
 optimizer:
   name: TorchOptim
@@ -26,12 +26,12 @@ downstream_expert:
   datarc:
     root: /abelab/DB4/JTES/jtes_v1.1
     meta_data: ./downstream/emotion_jtes-all/meta_data
-    test_fold: fold1
+    # test_fold: fold1
     pre_load: True
     train_batch_size: 4
     eval_batch_size: 4
     num_workers: 6
-    valid_ratio: 0.2
+    valid_ratio: 0.1
 
   modelrc:
     projector_dim: 256
