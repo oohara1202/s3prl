@@ -2,6 +2,7 @@ import os
 import math
 import torch
 import random
+import pickle
 from pathlib import Path
 
 import torch
@@ -44,10 +45,38 @@ class DownstreamExpert(nn.Module):
         assert os.path.exists(test_path)
         print(f'[Expert] - Testing path: {test_path}')
         
-        train_dataset = STUDIESDataset(DATA_ROOT, train_path, self.datarc['pre_load'])
-        self.train_dataset = train_dataset
-        self.dev_dataset = STUDIESDataset(DATA_ROOT, val_path, self.datarc['pre_load'])  # 名前をval --> dev
-        self.test_dataset = STUDIESDataset(DATA_ROOT, test_path, self.datarc['pre_load'])
+        train_dump = train_path + '.pkl'
+        if os.path.exists(train_dump):
+            with open(train_dump, 'rb') as f:
+                self.train_dataset = pickle.load(f)
+                print(f'[Expert] - Loaded: {train_dump}')
+        else:
+            self.train_dataset = STUDIESDataset(DATA_ROOT, train_path, self.datarc['pre_load'])
+            with open(train_dump, 'wb') as f:
+                pickle.dump(self.train_dataset, f)
+            print(f'[Expert] - Saved: {train_dump}')
+
+        dev_dump = val_path + '.pkl'  # 名前をval --> dev
+        if os.path.exists(dev_dump):
+            with open(dev_dump, 'rb') as f:
+                self.dev_dataset = pickle.load(f)
+                print(f'[Expert] - Loaded: {dev_dump}')
+        else:
+            self.dev_dataset = STUDIESDataset(DATA_ROOT, val_path, self.datarc['pre_load'])  
+            with open(dev_dump, 'wb') as f:
+                pickle.dump(self.dev_dataset, f)
+            print(f'[Expert] - Saved: {dev_dump}')
+
+        test_dump = test_path + '.pkl'  # 名前をval --> dev
+        if os.path.exists(test_dump):
+            with open(test_dump, 'rb') as f:
+                self.test_dataset = pickle.load(f)
+                print(f'[Expert] - Loaded: {test_dump}')
+        else:
+            self.test_dataset = STUDIESDataset(DATA_ROOT, test_path, self.datarc['pre_load'])
+            with open(test_dump, 'wb') as f:
+                pickle.dump(self.test_dataset, f)
+            print(f'[Expert] - Saved: {test_dump}')
 
         model_cls = eval(self.modelrc['select'])  # <class 's3prl.downstream.model.UtteranceLevel'>
         model_conf = self.modelrc.get(self.modelrc['select'], {})  # {'pooling': 'MeanPooling'}
@@ -149,18 +178,18 @@ class DownstreamExpert(nn.Module):
 
         return save_names
 
-    # def extract(self, feature, label, filename):
-    #     device = feature[0].device
-    #     feature_len = torch.IntTensor([len(feat) for feat in feature]).to(device=device)
-    #     feature = pad_sequence(feature, batch_first=True)  # リスト（バッチ）内の最大フレームにあわせてゼロ埋め
-    #     feature = self.projector(feature)  # [B, Len, 768] --> [B, Len, 256]
-    #     predicted, _, hidden_state = self.model(feature, feature_len)  # add hidden_state
+    def extract(self, feature):
+        device = feature[0].device
+        feature_len = torch.IntTensor([len(feat) for feat in feature]).to(device=device)
+        feature = pad_sequence(feature, batch_first=True)  # 1ファイルごとに見るが一応ゼロ埋め処理を埋める
+        feature = self.projector(feature)  # [B, Len, 768] --> [B, Len, 256]
+        predicted, _, hidden_state = self.model(feature, feature_len)  # add hidden_state
 
-    #     predicted_classid = predicted.max(dim=-1).indices
-    #     pp = self.softmax(predicted)
+        predicted_classid = predicted.max(dim=-1).indices
+        pp = self.softmax(predicted)
 
-    #     predicted_classid = predicted_classid.cpu()
-    #     pp = pp.cpu()
-    #     hidden_state = hidden_state.cpu()
+        predicted_classid = predicted_classid.cpu()  # 識別クラス
+        pp = pp.cpu()                                # 事後確率
+        hidden_state = hidden_state.cpu()            # 表現ベクトル
 
-    #     return predicted_classid, pp, hidden_state
+        return predicted_classid, pp, hidden_state
