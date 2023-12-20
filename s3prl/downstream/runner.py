@@ -18,6 +18,8 @@ from torch.utils.data import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import is_initialized, get_rank, get_world_size
 
+from torchinfo import summary
+
 from s3prl import hub
 from s3prl.optimizers import get_optimizer
 from s3prl.schedulers import get_scheduler
@@ -185,8 +187,8 @@ class Runner():
         Downstream = getattr(expert, "DownstreamExpert")
 
         model = Downstream(
-            upstream_dim = self.featurizer.model.output_dim,
-            upstream_rate = self.featurizer.model.downsample_rate,
+            upstream_dim = self.featurizer.model.output_dim,  # 768
+            upstream_rate = self.featurizer.model.downsample_rate,  # 320
             **self.config,
             **vars(self.args)
         ).to(self.args.device)
@@ -225,6 +227,13 @@ class Runner():
 
 
     def train(self):
+        print('[upstream] Model structure:')
+        summary(self.upstream.model, depth=5)
+        print('[featurizer] Model structure:')
+        summary(self.featurizer.model, depth=5)
+        print('[downstream] Model structure:')
+        summary(self.downstream.model, depth=5)
+
         # trainable parameters and train/eval mode
         trainable_models = []
         trainable_paras = []
@@ -522,6 +531,96 @@ class Runner():
             features = self.upstream.model(wavs)
             features = self.featurizer.model(wavs, features)
             self.downstream.model.inference(features, [filename])
+
+    # 追加
+    def extract(self):
+        import json
+        import pickle
+        from sklearn import metrics
+        from torchaudio.transforms import Resample
+
+        SAMPLE_RATE = 16000
+
+        filelist = self.args.extract_file
+        with open(filelist, 'r') as f:
+            json_data = json.load(f)
+
+        class_dict = json_data['labels']
+        idx2emotion = {value: key for key, value in class_dict.items()}
+        meta_data = json_data['meta_data']
+        
+        # Downsampler
+        _, origin_sr = torchaudio.load(os.path.join(meta_data[0]['path']))
+        resampler = Resample(origin_sr, SAMPLE_RATE)
+
+        for entry in self.all_entries:
+            entry.model.eval()
+
+        truth_dict = dict()
+        predict_dict = dict()
+        for spk in ['Teacher', 'MStudent', 'FStudent', 'Operator']:
+            truth_dict[spk] = list()
+            predict_dict[spk] = list()
+
+        ser_pp_dict = dict()
+        emo_representation_dict = dict()
+
+        for d in meta_data:
+            filepath = d['path']
+            if '/STUDIES/' in filepath:
+                filepath = filepath.replace('/abelab/DB4/STUDIES/', 'dataset/STUDIES/')
+            elif '/STUDIES-2/' in filepath:
+                filepath = filepath.replace('/abelab/DB4/STUDIES-2/', 'dataset/CALLS/')
+            
+            wav, _ = torchaudio.load(d['path'])
+            wav = resampler(wav).squeeze(0)   # [Length]
+            wav = [wav.to(self.args.device)]  # lenが1のlistで中には[Length]のwavform
+
+            label = d['label']  # Neutral
+            label = class_dict[label]  # 0
+
+            if 'Teacher' in filepath:
+                spk = 'Teacher'
+            elif 'MStudent' in filepath:
+                spk = 'MStudent'
+            elif 'FStudent' in filepath:
+                spk = 'FStudent'
+            else:
+                spk = 'Operator'
+
+            with torch.no_grad():
+                feature = self.upstream.model(wav)
+                feature = self.featurizer.model(wav, feature)  # lenが1のlistで中には[Length, 768]の特徴量
+                predicted_classid, pp, hidden_state = self.downstream.model.extract(feature)
+
+                ser_pp_dict[filepath] = pp.squeeze()
+                emo_representation_dict[filepath] = hidden_state.squeeze()
+
+                truth_dict[spk].append(label)
+                predict_dict[spk].append(predicted_classid)
+
+        # TTS用に保存
+        tr = os.path.basename(filelist).split('_')[0]
+        savename = '_audio_sid_text_' + tr + '_filelist.txt.cleaned.pkl'
+
+        with open('/work/abelab4/s_koha/vits/dump/serpp/studies-calls/studies-calls'+savename, 'wb') as f:
+            pickle.dump(ser_pp_dict, f)
+        with open('/work/abelab4/s_koha/vits/dump/emorepresentation/studies-calls/studies-calls'+savename, 'wb') as f:
+            pickle.dump(emo_representation_dict, f)
+
+        with open('/work/abelab4/s_koha/vits/dump/serpp/studies-teacher/studies-teacher'+savename, 'wb') as f:
+            pickle.dump(ser_pp_dict, f)
+        with open('/work/abelab4/s_koha/vits/dump/emorepresentation/studies-teacher/studies-teacher'+savename, 'wb') as f:
+            pickle.dump(emo_representation_dict, f)
+
+        print('Accuracy:')
+        for spk in ['Teacher', 'MStudent', 'FStudent', 'Operator']:
+            if len(truth_dict[spk]) == 0:
+                continue
+            acc = metrics.accuracy_score(truth_dict[spk], predict_dict[spk])
+            print(f'{spk}: {round(acc*100, 2)}')
+            print(metrics.classification_report(truth_dict[spk], predict_dict[spk]))
+            print(metrics.confusion_matrix(truth_dict[spk], predict_dict[spk]))
 
     def push_to_huggingface_hub(self):
         """Creates a downstream repository on the Hub and pushes training artifacts to it."""
