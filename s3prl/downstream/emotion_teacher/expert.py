@@ -83,7 +83,7 @@ class DownstreamExpert(nn.Module):
         self.projector = nn.Linear(upstream_dim, self.modelrc['projector_dim'])  # 768 --> 256
         self.model = model_cls(
             input_dim = self.modelrc['projector_dim'],
-            output_dim = train_dataset.class_num,
+            output_dim = self.train_dataset.class_num,
             **model_conf,
         )
         self.objective = nn.CrossEntropyLoss()

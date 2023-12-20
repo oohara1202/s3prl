@@ -20,7 +20,7 @@ def get_downstream_args():
     parser = argparse.ArgumentParser()
 
     # train or test for this experiment
-    parser.add_argument('-m', '--mode', choices=['train', 'evaluate', 'inference'], required=True)
+    parser.add_argument('-m', '--mode', choices=['train', 'evaluate', 'inference', 'extract'], required=True)  # 'extract'を追加
     parser.add_argument('-t', '--evaluate_split', default='test')
     parser.add_argument('-o', '--override', help='Used to override args and config, this is at the highest priority')
 
@@ -84,6 +84,9 @@ def get_downstream_args():
     parser.add_argument('--verbose', action='store_true', help='Print model infomation')
     parser.add_argument('--disable_cudnn', action='store_true', help='Disable CUDNN')
 
+    # 小原追加分
+    parser.add_argument('--extract_file', type=str, help='Filenames of extracting features')
+
     args = parser.parse_args()
     backup_files = []
 
@@ -124,7 +127,7 @@ def get_downstream_args():
         cannot_overwrite_args = [
             'mode', 'evaluate_split', 'override',
             'backend', 'local_rank', 'past_exp',
-            'device'
+            'device', 'extract_file'               # modified
         ]
         args = update_args(args, ckpt['Args'], preserve_list=cannot_overwrite_args)
         os.makedirs(args.expdir, exist_ok=True)

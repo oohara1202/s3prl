@@ -181,9 +181,9 @@ class Featurizer(nn.Module):
         else:
             feature = feature.cpu()
 
-        self.output_dim = feature.size(-1)
+        self.output_dim = feature.size(-1)  # HuBERT: 768
         if hasattr(upstream, "get_downsample_rates"):
-            self.downsample_rate = upstream.get_downsample_rates(feature_selection)
+            self.downsample_rate = upstream.get_downsample_rates(feature_selection)  # 320
             show(
                 f"[{self.name}] - The selected feature {feature_selection}'s downsample rate is {self.downsample_rate}",
                 file=sys.stderr,
@@ -201,6 +201,8 @@ class Featurizer(nn.Module):
             )
 
     def _select_feature(self, features):
+        # len(features['hidden_states']) is 13.
+        # features['hidden_states'][0].shape is torch.Size([1, 49, 768]).
         feature = features.get(self.feature_selection)
 
         if isinstance(feature, dict):
@@ -212,7 +214,7 @@ class Featurizer(nn.Module):
         if isinstance(feature, (list, tuple)) and isinstance(self.layer_selection, int):
             feature = feature[self.layer_selection]
 
-        return feature
+        return feature  # [1, 49, 768]の特徴量が13個連なってリストになっているおそらくtransの各層の出力
 
     def _weighted_sum(self, feature):
         assert self.layer_num == len(feature), (
@@ -232,20 +234,20 @@ class Featurizer(nn.Module):
             " following options: --upstream_trainable --upstream_feature_selection last_hidden_state."
             " Or: -f -s last_hidden_state"
         )
-        stacked_feature = torch.stack(feature, dim=0)
-
+        stacked_feature = torch.stack(feature, dim=0)  # [13, 1, 49, 768]
         if self.normalize:
             stacked_feature = F.layer_norm(
                 stacked_feature, (stacked_feature.shape[-1],)
             )
 
         _, *origin_shape = stacked_feature.shape
-        stacked_feature = stacked_feature.view(self.layer_num, -1)
+        stacked_feature = stacked_feature.view(self.layer_num, -1)  # [13, 37632]
+        # self.weights: 13dim の0.
         norm_weights = F.softmax(self.weights, dim=-1)
         weighted_feature = (norm_weights.unsqueeze(-1) * stacked_feature).sum(dim=0)
         weighted_feature = weighted_feature.view(*origin_shape)
 
-        return weighted_feature
+        return weighted_feature  # [B, Len, 768]
 
     def tolist(self, paired_wavs: List[Tensor], paired_feature: Tensor):
         assert paired_feature.dim() == 3, "(batch_size, max_seq_len, feat_dim)"

@@ -14,6 +14,8 @@ class FrameLevel(nn.Module):
     def __init__(self, input_dim, output_dim, hiddens=None, activation='ReLU', **kwargs):
         super().__init__()
         latest_dim = input_dim
+        # hiddens = [256, 192,]  # こんな感じで書くと線形層が増える
+        # hiddens = [192,]       # 256 --> 192
         self.hiddens = []
         if hiddens is not None:
             for dim in hiddens:
@@ -29,7 +31,7 @@ class FrameLevel(nn.Module):
         hidden_state = self.hiddens(hidden_state)
         logit = self.linear(hidden_state)
 
-        return logit, features_len
+        return logit, features_len, hidden_state  # add
 
 
 class UtteranceLevel(nn.Module):
@@ -51,11 +53,10 @@ class UtteranceLevel(nn.Module):
     def forward(self, hidden_state, features_len=None):
         if self.pre_net is not None:
             hidden_state, features_len = self.pre_net(hidden_state, features_len)
-
         pooled, features_len = self.pooling(hidden_state, features_len)
-        logit, features_len = self.post_net(pooled, features_len)
+        logit, features_len, emo_representation = self.post_net(pooled, features_len)  # add
 
-        return logit, features_len
+        return logit, features_len, emo_representation  # add
 
 
 class MeanPooling(nn.Module):
