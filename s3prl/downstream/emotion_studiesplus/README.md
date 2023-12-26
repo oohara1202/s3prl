@@ -1,0 +1,5 @@
+# emotion_studiesplus
+
+TTSモデルのためのSER学習
+STUDIESとCALLSを使用
+3感情でTTSモデルと同じデータ分割
