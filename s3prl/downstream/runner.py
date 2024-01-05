@@ -603,14 +603,26 @@ class Runner():
         tr = os.path.basename(filelist).split('_')[0]
         savename = '_audio_sid_text_' + tr + '_filelist.txt.cleaned.pkl'
 
-        with open('/work/abelab4/s_koha/vits/dump/serpp/studies-calls/studies-calls'+savename, 'wb') as f:
+        # # STUDIES SERモデルの特徴量
+        # with open('/work/abelab4/s_koha/vits/dump/serpp/studies-calls/studies-calls'+savename, 'wb') as f:
+        #     pickle.dump(ser_pp_dict, f)
+        # with open('/work/abelab4/s_koha/vits/dump/emorepresentation/studies-calls/studies-calls'+savename, 'wb') as f:
+        #     pickle.dump(emo_representation_dict, f)
+
+        # with open('/work/abelab4/s_koha/vits/dump/serpp/studies-teacher/studies-teacher'+savename, 'wb') as f:
+        #     pickle.dump(ser_pp_dict, f)
+        # with open('/work/abelab4/s_koha/vits/dump/emorepresentation/studies-teacher/studies-teacher'+savename, 'wb') as f:
+        #     pickle.dump(emo_representation_dict, f)
+
+        # JTES SERモデルの特徴量
+        with open('/work/abelab4/s_koha/vits/dump/jserpp/studies-calls/studies-calls'+savename, 'wb') as f:
             pickle.dump(ser_pp_dict, f)
-        with open('/work/abelab4/s_koha/vits/dump/emorepresentation/studies-calls/studies-calls'+savename, 'wb') as f:
+        with open('/work/abelab4/s_koha/vits/dump/jemorepresentation/studies-calls/studies-calls'+savename, 'wb') as f:
             pickle.dump(emo_representation_dict, f)
 
-        with open('/work/abelab4/s_koha/vits/dump/serpp/studies-teacher/studies-teacher'+savename, 'wb') as f:
+        with open('/work/abelab4/s_koha/vits/dump/jserpp/studies-teacher/studies-teacher'+savename, 'wb') as f:
             pickle.dump(ser_pp_dict, f)
-        with open('/work/abelab4/s_koha/vits/dump/emorepresentation/studies-teacher/studies-teacher'+savename, 'wb') as f:
+        with open('/work/abelab4/s_koha/vits/dump/jemorepresentation/studies-teacher/studies-teacher'+savename, 'wb') as f:
             pickle.dump(emo_representation_dict, f)
 
         print('Accuracy:')
@@ -621,6 +633,52 @@ class Runner():
             print(f'{spk}: {round(acc*100, 2)}')
             print(metrics.classification_report(truth_dict[spk], predict_dict[spk]))
             print(metrics.confusion_matrix(truth_dict[spk], predict_dict[spk]))
+
+    # 追加
+    def infer(self):
+        from sklearn import metrics
+        from torchaudio.transforms import Resample
+
+        ORIGIN_SR = 22050
+        SAMPLE_RATE = 16000
+
+        emotion_list = ['Neutral', 'Happy', 'Sad']
+        class_dict = {"Neutral": 0, "Happy": 1, "Sad": 2}
+        idx2emotion = {value: key for key, value in class_dict.items()}
+
+        inference_dir = self.args.inference_dir
+
+        # Downsampler
+        resampler = Resample(ORIGIN_SR, SAMPLE_RATE)
+
+        for entry in self.all_entries:
+            entry.model.eval()
+
+        for emotion in emotion_list:
+            truth_list = list()
+            predict_list = list()
+            emotion_dir = os.path.join(inference_dir, emotion)
+            wav_files = glob.glob(os.path.join(emotion_dir, '*.wav'))
+            for filepath in wav_files:
+                wav, _ = torchaudio.load(filepath)
+                wav = resampler(wav).squeeze(0)   # [Length]
+                wav = [wav.to(self.args.device)]  # lenが1のlistで中には[Length]のwavform
+
+                label = emotion            # e.g., Neutral
+                # label = class_dict[label]  # e.g., 0
+
+                with torch.no_grad():
+                    feature = self.upstream.model(wav)
+                    feature = self.featurizer.model(wav, feature)  # lenが1のlistで中には[Length, 768]の特徴量
+                    predicted_classid, pp, hidden_state = self.downstream.model.extract(feature)
+
+                    truth_list.append(label)
+                    predict_list.append(idx2emotion[predicted_classid[0].item()])
+                    
+            acc = metrics.accuracy_score(truth_list, predict_list)
+            print(f'{emotion}: {round(acc*100, 2)}')
+            # print(metrics.classification_report(truth_list, predict_list))
+            print(metrics.confusion_matrix(truth_list, predict_list, labels=emotion_list))
 
     def push_to_huggingface_hub(self):
         """Creates a downstream repository on the Hub and pushes training artifacts to it."""
